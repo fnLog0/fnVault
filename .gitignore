@@ -1,0 +1,12 @@
+# Rust build artifacts
+/target
+
+# macOS
+.DS_Store
+
+# editor / backup
+**/*.rs.bk
+
+# local AWS migration test scratch (the committed .fnaws sample is fine — it
+# holds only public AWS example keys)
+/tmp-aws-*

@@ -1,0 +1,15 @@
+# Sample AWS-credentials-format file for testing the fnVault migration.
+# These are the well-known AWS *example* keys — NOT real. Safe to commit/share.
+
+[default]
+aws_access_key_id = AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+[work]
+aws_access_key_id = AKIAI44QH8DHBEXAMPLE
+aws_secret_access_key = je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY
+
+[temp-mfa]
+aws_access_key_id = ASIAIOSFODNN7EXAMPLE
+aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+aws_session_token = FwoGZXIvYXdzEXAMPLEsessionTOKENvalue1234567890abcdef
