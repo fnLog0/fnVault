@@ -18,5 +18,16 @@ hmac.workspace = true
 sha1.workspace = true
 base32.workspace = true
 
+# Linux secret storage via the Secret Service (gnome-keyring / KWallet).
+# Compiled only on Linux; macOS uses the Keychain shim instead. The
+# async-secret-service + async-io + crypto-rust combo is pure Rust (zbus, no
+# system libdbus) and avoids nesting a second tokio runtime inside the daemon's.
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", default-features = false, features = [
+    "async-secret-service",
+    "async-io",
+    "crypto-rust",
+] }
+
 [build-dependencies]
 cc = "1"

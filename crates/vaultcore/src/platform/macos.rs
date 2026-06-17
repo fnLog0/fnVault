@@ -1,5 +1,5 @@
-//! Safe Rust wrappers over the Objective-C Keychain/Touch ID shim
-//! (`keychain_shim.m`).
+//! macOS backend: Keychain storage + Touch ID (LocalAuthentication) + sleep/
+//! screen-lock observer, via the Objective-C shim (`keychain_shim.m`).
 
 use std::ffi::CString;
 
@@ -78,7 +78,7 @@ pub fn read_master_key() -> Result<[u8; KEY_LEN]> {
     }
 }
 
-/// Touch ID gate followed by a master-key read — the full unlock step.
+/// Auth gate followed by a master-key read — the full unlock step.
 pub fn touch_id_unlock(reason: &str) -> Result<[u8; KEY_LEN]> {
     touchid_authenticate(reason)?;
     read_master_key()

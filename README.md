@@ -1,11 +1,16 @@
 # fnVault
 
-A small credential vault for macOS. Unlock once with Touch ID, then read your
-secrets straight from the command line — so they stop living in plaintext
-dotfiles. It's a Rust CLI with a TUI dashboard, backed by the macOS Keychain.
+A small credential vault. Unlock once, then read your secrets straight from the
+command line — so they stop living in plaintext dotfiles. It's a Rust CLI with a
+TUI dashboard.
+
+- **macOS**: secrets in the Keychain, unlock with **Touch ID**.
+- **Linux**: secrets in the Secret Service (gnome-keyring / KWallet), unlock with
+  a **vault passphrase** (set on first unlock). Fingerprint (fprintd) and
+  auto-lock-on-sleep are planned.
 
 Built so your tools (and an AI agent on your machine) can grab a secret with a
-plain command, while the actual unlock still needs your fingerprint.
+plain command, while the actual unlock still needs you.
 
 ## How it works
 
@@ -16,10 +21,10 @@ Three pieces:
 - **`vault`** — the CLI you and your tools call.
 - a **TUI dashboard** when you run `vault` with no arguments.
 
-One fingerprint unlocks the session. After that, reads are silent until you lock
-it or it goes idle (15 min by default, `FNVAULT_IDLE_SECS` to change). Secrets are
-encrypted with XChaCha20-Poly1305 and kept in the Keychain; the key is wiped from
-memory the moment it locks.
+One unlock — Touch ID on macOS, vault passphrase on Linux — opens the session.
+After that, reads are silent until you lock it or it goes idle (15 min by default,
+`FNVAULT_IDLE_SECS` to change). Secrets are encrypted with XChaCha20-Poly1305 and
+kept in the OS secret store; the key is wiped from memory the moment it locks.
 
 ## Install
 

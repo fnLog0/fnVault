@@ -143,6 +143,7 @@ fn init_logging() {
         .try_init();
 }
 
+#[cfg(not(target_os = "linux"))]
 fn peer_uid(stream: &UnixStream) -> Option<u32> {
     let fd = stream.as_raw_fd();
     let mut uid: libc::uid_t = 0;
@@ -150,6 +151,27 @@ fn peer_uid(stream: &UnixStream) -> Option<u32> {
     let r = unsafe { libc::getpeereid(fd, &mut uid, &mut gid) };
     if r == 0 {
         Some(uid)
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn peer_uid(stream: &UnixStream) -> Option<u32> {
+    let fd = stream.as_raw_fd();
+    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let r = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut _ as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    if r == 0 {
+        Some(cred.uid)
     } else {
         None
     }
