@@ -22,7 +22,14 @@ mod ffi {
         ) -> i32;
         pub fn fnvault_delete_item(account: *const c_char) -> i32;
         pub fn fnvault_free(p: *mut u8);
+        pub fn fnvault_run_lock_observer(cb: extern "C" fn());
     }
+}
+
+/// Register for system sleep / screen-lock and run this thread's run loop,
+/// invoking `cb` on either event. Blocks forever — call from a dedicated thread.
+pub fn run_lock_observer(cb: extern "C" fn()) {
+    unsafe { ffi::fnvault_run_lock_observer(cb) }
 }
 
 fn cstr(s: &str) -> Result<CString> {
@@ -65,7 +72,9 @@ pub fn read_master_key() -> Result<[u8; KEY_LEN]> {
     let r = unsafe { ffi::fnvault_read_master_key(out.as_mut_ptr(), KEY_LEN, &mut len) };
     match r {
         0 if len == KEY_LEN => Ok(out),
-        _ => Err(VaultError::Keychain(format!("read master key failed (code {r})"))),
+        _ => Err(VaultError::Keychain(format!(
+            "read master key failed (code {r})"
+        ))),
     }
 }
 
@@ -90,7 +99,9 @@ pub fn set_item(account: &str, data: &[u8]) -> Result<()> {
     if r == 0 {
         Ok(())
     } else {
-        Err(VaultError::Keychain(format!("failed to store item `{account}`")))
+        Err(VaultError::Keychain(format!(
+            "failed to store item `{account}`"
+        )))
     }
 }
 
@@ -106,7 +117,9 @@ pub fn get_item(account: &str) -> Result<Option<Vec<u8>>> {
             Ok(Some(v))
         }
         1 => Ok(None),
-        _ => Err(VaultError::Keychain(format!("failed to read item `{account}`"))),
+        _ => Err(VaultError::Keychain(format!(
+            "failed to read item `{account}`"
+        ))),
     }
 }
 
@@ -116,6 +129,8 @@ pub fn delete_item(account: &str) -> Result<()> {
     if r == 0 {
         Ok(())
     } else {
-        Err(VaultError::Keychain(format!("failed to delete item `{account}`")))
+        Err(VaultError::Keychain(format!(
+            "failed to delete item `{account}`"
+        )))
     }
 }

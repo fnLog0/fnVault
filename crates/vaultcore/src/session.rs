@@ -12,21 +12,30 @@ use crate::keychain;
 pub struct Session {
     key: Option<Zeroizing<[u8; KEY_LEN]>>,
     last_activity: Instant,
+    unlocked_at: Instant,
     idle_timeout: Duration,
+    max_session: Duration,
 }
 
 impl Session {
-    /// `idle_timeout` of zero disables the idle backstop.
-    pub fn new(idle_timeout: Duration) -> Self {
+    /// `idle_timeout` and `max_session` of zero disable those backstops.
+    pub fn new(idle_timeout: Duration, max_session: Duration) -> Self {
+        let now = Instant::now();
         Session {
             key: None,
-            last_activity: Instant::now(),
+            last_activity: now,
+            unlocked_at: now,
             idle_timeout,
+            max_session,
         }
     }
 
     pub fn idle_timeout(&self) -> Duration {
         self.idle_timeout
+    }
+
+    pub fn max_session(&self) -> Duration {
+        self.max_session
     }
 
     pub fn is_unlocked(&self) -> bool {
@@ -38,16 +47,22 @@ impl Session {
     pub fn unlock(&mut self, reason: &str) -> Result<()> {
         if self.key.is_none() {
             let key = keychain::touch_id_unlock(reason)?;
-            self.key = Some(Zeroizing::new(key));
+            self.set_key(key);
+        } else {
+            self.touch();
         }
-        self.touch();
         Ok(())
     }
 
     /// Cache an already-read key (used when the FFI read happened off-thread).
     pub fn set_key(&mut self, key: [u8; KEY_LEN]) {
+        let was_locked = self.key.is_none();
         self.key = Some(Zeroizing::new(key));
-        self.touch();
+        let now = Instant::now();
+        self.last_activity = now;
+        if was_locked {
+            self.unlocked_at = now;
+        }
     }
 
     pub fn lock(&mut self) {
@@ -79,17 +94,29 @@ impl Session {
         Some(self.idle_timeout.saturating_sub(self.since_activity()))
     }
 
-    /// Relock if the idle timeout has elapsed. Returns true if it relocked.
-    pub fn maybe_relock(&mut self) -> bool {
-        if self.is_unlocked()
-            && !self.idle_timeout.is_zero()
-            && self.since_activity() >= self.idle_timeout
-        {
-            self.lock();
-            true
-        } else {
-            false
+    /// Time left before the absolute session cap relocks, if one is set.
+    pub fn session_remaining(&self) -> Option<Duration> {
+        if !self.is_unlocked() || self.max_session.is_zero() {
+            return None;
         }
+        Some(self.max_session.saturating_sub(self.unlocked_at.elapsed()))
+    }
+
+    /// Relock if the idle timeout OR the absolute session cap has elapsed.
+    /// Returns the reason it relocked, if it did.
+    pub fn maybe_relock(&mut self) -> Option<&'static str> {
+        if !self.is_unlocked() {
+            return None;
+        }
+        if !self.idle_timeout.is_zero() && self.since_activity() >= self.idle_timeout {
+            self.lock();
+            return Some("idle");
+        }
+        if !self.max_session.is_zero() && self.unlocked_at.elapsed() >= self.max_session {
+            self.lock();
+            return Some("max_session");
+        }
+        None
     }
 }
 
@@ -99,14 +126,15 @@ mod tests {
 
     #[test]
     fn locked_by_default() {
-        let s = Session::new(Duration::from_secs(900));
+        let s = Session::new(Duration::from_secs(900), Duration::ZERO);
         assert!(!s.is_unlocked());
         assert!(s.idle_remaining().is_none());
+        assert!(s.session_remaining().is_none());
     }
 
     #[test]
     fn set_key_unlocks_and_lock_clears() {
-        let mut s = Session::new(Duration::from_secs(900));
+        let mut s = Session::new(Duration::from_secs(900), Duration::ZERO);
         s.set_key([7u8; KEY_LEN]);
         assert!(s.is_unlocked());
         assert_eq!(s.key().unwrap(), &[7u8; KEY_LEN]);
@@ -117,14 +145,24 @@ mod tests {
 
     #[test]
     fn idle_relock_fires() {
-        let mut s = Session::new(Duration::from_millis(0)); // disabled
+        let mut s = Session::new(Duration::ZERO, Duration::ZERO); // both disabled
         s.set_key([1u8; KEY_LEN]);
-        assert!(!s.maybe_relock()); // disabled never relocks
+        assert!(s.maybe_relock().is_none());
 
-        let mut s = Session::new(Duration::from_nanos(1));
+        let mut s = Session::new(Duration::from_nanos(1), Duration::ZERO);
         s.set_key([1u8; KEY_LEN]);
         std::thread::sleep(Duration::from_millis(2));
-        assert!(s.maybe_relock());
+        assert_eq!(s.maybe_relock(), Some("idle"));
+        assert!(!s.is_unlocked());
+    }
+
+    #[test]
+    fn max_session_relock_fires() {
+        // idle disabled, tiny absolute cap -> relocks on cap.
+        let mut s = Session::new(Duration::ZERO, Duration::from_nanos(1));
+        s.set_key([1u8; KEY_LEN]);
+        std::thread::sleep(Duration::from_millis(2));
+        assert_eq!(s.maybe_relock(), Some("max_session"));
         assert!(!s.is_unlocked());
     }
 }

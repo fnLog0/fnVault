@@ -23,8 +23,21 @@ use vaultcore::store;
 type Shared = Arc<Mutex<Session>>;
 
 const DEFAULT_IDLE_SECS: u64 = 900; // 15 minutes
+const DEFAULT_MAX_SESSION_SECS: u64 = 0; // absolute cap; 0 = disabled
 const IDLE_CHECK_SECS: u64 = 15;
 const UNLOCK_REASON: &str = "Unlock fnVault to access your credentials";
+const REAUTH_REASON: &str = "Re-authenticate to read a sensitive secret";
+
+/// Shared with the native sleep/screen-lock observer thread so its C callback
+/// can relock immediately.
+static OBSERVED_SESSION: std::sync::OnceLock<Shared> = std::sync::OnceLock::new();
+
+extern "C" fn on_lock_event() {
+    if let Some(session) = OBSERVED_SESSION.get() {
+        session.blocking_lock().lock();
+        tracing::info!("auto-lock: system sleep or screen lock");
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -34,11 +47,15 @@ async fn main() -> Result<()> {
 
     init_logging();
 
-    let idle_secs = std::env::var("FNVAULT_IDLE_SECS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_IDLE_SECS);
+    // Best-effort: keep secret pages out of swap. Non-fatal if it fails.
+    if unsafe { libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE) } != 0 {
+        tracing::debug!("mlockall failed (non-fatal)");
+    }
+
+    let idle_secs = env_secs("FNVAULT_IDLE_SECS", DEFAULT_IDLE_SECS);
+    let max_secs = env_secs("FNVAULT_MAX_SESSION", DEFAULT_MAX_SESSION_SECS);
     let idle_timeout = Duration::from_secs(idle_secs);
+    let max_session = Duration::from_secs(max_secs);
 
     let sock = paths::socket_path();
     // Refuse to start a second daemon; clean up a stale socket otherwise.
@@ -52,23 +69,27 @@ async fn main() -> Result<()> {
 
     let listener = UnixListener::bind(&sock).context("bind unix socket")?;
     fs::set_permissions(&sock, fs::Permissions::from_mode(0o600)).context("chmod socket")?;
-    tracing::info!(?sock, idle_secs, "vaultd started");
+    tracing::info!(?sock, idle_secs, max_secs, "vaultd started");
 
-    let session: Shared = Arc::new(Mutex::new(Session::new(idle_timeout)));
+    let session: Shared = Arc::new(Mutex::new(Session::new(idle_timeout, max_session)));
 
-    // Idle-timeout backstop.
+    // Idle-timeout + absolute-cap backstop.
     {
         let session = session.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_secs(IDLE_CHECK_SECS));
             loop {
                 tick.tick().await;
-                if session.lock().await.maybe_relock() {
-                    tracing::info!("idle timeout reached: vault relocked");
+                if let Some(reason) = session.lock().await.maybe_relock() {
+                    tracing::info!(reason, "vault relocked");
                 }
             }
         });
     }
+
+    // Auto-lock on system sleep / screen lock (native observer thread).
+    let _ = OBSERVED_SESSION.set(session.clone());
+    std::thread::spawn(|| vaultcore::keychain::run_lock_observer(on_lock_event));
 
     let our_uid = unsafe { libc::getuid() };
 
@@ -103,6 +124,13 @@ async fn main() -> Result<()> {
             }
         }
     }
+}
+
+fn env_secs(var: &str, default: u64) -> u64 {
+    std::env::var(var)
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(default)
 }
 
 fn init_logging() {
@@ -192,17 +220,29 @@ async fn dispatch_inner(req: Request, session: &Shared) -> VResult<Response> {
         Request::Get { name } => {
             require_init()?;
             ensure_unlocked(session).await?;
+            // Tiered policy: sensitive tags require a fresh Touch ID per read.
+            if let Some(meta) = store::get_meta(&name)? {
+                if store::is_sensitive_tag(&meta.tag) {
+                    reauth().await?;
+                    session.lock().await.touch();
+                }
+            }
             let key = current_key(session).await?;
             let value = store::get_secret(&key, &name)?;
             Ok(Response::Secret {
                 value: to_utf8(value)?,
             })
         }
-        Request::Set { name, tag, value } => {
+        Request::Set {
+            name,
+            tag,
+            value,
+            expires,
+        } => {
             require_init()?;
             ensure_unlocked(session).await?;
             let key = current_key(session).await?;
-            store::set_secret(&key, &name, &tag, value.as_bytes())?;
+            store::set_secret(&key, &name, &tag, value.as_bytes(), expires)?;
             tracing::info!(secret = %name, "secret stored");
             Ok(Response::Ok)
         }
@@ -213,7 +253,22 @@ async fn dispatch_inner(req: Request, session: &Shared) -> VResult<Response> {
             tracing::info!(secret = %name, "secret deleted");
             Ok(Response::Ok)
         }
+        Request::ExportAll => {
+            require_init()?;
+            ensure_unlocked(session).await?;
+            let key = current_key(session).await?;
+            let records = store::export_all(&key)?;
+            tracing::info!(count = records.len(), "vault exported");
+            Ok(Response::Export { records })
+        }
     }
+}
+
+/// Fresh Touch ID without re-reading the key (used for the tiered policy).
+async fn reauth() -> VResult<()> {
+    tokio::task::spawn_blocking(|| keychain::touchid_authenticate(REAUTH_REASON))
+        .await
+        .map_err(|e| VaultError::Protocol(format!("reauth task panicked: {e}")))?
 }
 
 fn require_init() -> VResult<()> {
@@ -260,5 +315,6 @@ async fn build_status(session: &Shared) -> StatusInfo {
             None
         },
         idle_remaining_secs: s.idle_remaining().map(|d| d.as_secs()),
+        session_remaining_secs: s.session_remaining().map(|d| d.as_secs()),
     }
 }

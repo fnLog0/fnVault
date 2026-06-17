@@ -6,10 +6,10 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
-use ratatui::DefaultTerminal;
 use ratatui::widgets::{
     Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap,
 };
+use ratatui::DefaultTerminal;
 
 use vaultcore::protocol::{Request, Response, StatusInfo};
 use vaultcore::store::SecretMeta;
@@ -218,7 +218,8 @@ impl App {
         if let Some(v) = self.fetch_value(name) {
             match arboard::Clipboard::new().and_then(|mut c| c.set_text(v)) {
                 Ok(_) => {
-                    self.clip_clear_at = Some(Instant::now() + Duration::from_secs(CLIP_CLEAR_SECS));
+                    self.clip_clear_at =
+                        Some(Instant::now() + Duration::from_secs(CLIP_CLEAR_SECS));
                     self.toast(format!("copied — clears in {CLIP_CLEAR_SECS}s"));
                 }
                 Err(e) => self.toast(format!("clipboard error: {e}")),
@@ -291,6 +292,7 @@ impl App {
             name: f.name.clone(),
             tag: f.tag.clone(),
             value: f.value.clone(),
+            expires: None,
         };
         match self.req(req) {
             Response::Ok => {
@@ -730,6 +732,13 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App) {
                 ]),
                 Line::from(vec![label("Created"), Span::raw(meta.created.clone())]),
                 Line::from(vec![label("Updated"), Span::raw(meta.updated.clone())]),
+                Line::from(vec![
+                    label("Expires"),
+                    match &meta.expires {
+                        Some(e) => Span::raw(e.clone()),
+                        None => Span::styled("—", Style::new().fg(Color::DarkGray)),
+                    },
+                ]),
                 Line::from(""),
                 value_line,
                 Line::from(""),
@@ -742,7 +751,9 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App) {
     };
 
     f.render_widget(
-        Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
         area,
     );
 }
@@ -775,7 +786,11 @@ fn draw_form(f: &mut Frame, area: Rect, app: &App) {
         };
         let mut spans = vec![Span::styled(
             format!("{name:<7}"),
-            Style::new().fg(if disabled { Color::DarkGray } else { Color::Gray }),
+            Style::new().fg(if disabled {
+                Color::DarkGray
+            } else {
+                Color::Gray
+            }),
         )];
         let mut val_style = Style::new();
         if focused {
@@ -797,7 +812,13 @@ fn draw_form(f: &mut Frame, area: Rect, app: &App) {
             false,
             app.form.editing,
         ),
-        field_line("Tag", &app.form.tag, app.form.field == Field::Tag, false, false),
+        field_line(
+            "Tag",
+            &app.form.tag,
+            app.form.field == Field::Tag,
+            false,
+            false,
+        ),
         field_line(
             "Value",
             &app.form.value,
@@ -930,7 +951,9 @@ fn label(name: &str) -> Span<'static> {
 
 fn is_sensitive(tag: &str) -> bool {
     let t = tag.to_lowercase();
-    ["banking", "prod", "production", "bank"].iter().any(|k| t.contains(k))
+    ["banking", "prod", "production", "bank"]
+        .iter()
+        .any(|k| t.contains(k))
 }
 
 fn fmt_secs(secs: u64) -> String {

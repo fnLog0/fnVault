@@ -23,6 +23,7 @@
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 #import <LocalAuthentication/LocalAuthentication.h>
+#import <AppKit/AppKit.h>
 #import <dispatch/dispatch.h>
 
 static NSString *const kMasterService = @"fnvault.masterkey";
@@ -177,3 +178,29 @@ int fnvault_delete_item(const char *account) {
 }
 
 void fnvault_free(uint8_t *p) { free(p); }
+
+// ---- auto-lock observer -------------------------------------------------
+
+// Registers for system sleep and screen-lock, invoking `cb` on either, then
+// runs this thread's run loop forever. Call from a dedicated thread. The
+// `queue:nil` form delivers blocks on this thread's run loop (not the main
+// thread, which runs the tokio loop instead of an NSRunLoop).
+typedef void (*fnv_lock_cb)(void);
+
+void fnvault_run_lock_observer(fnv_lock_cb cb) {
+    @autoreleasepool {
+        NSNotificationCenter *ws = [[NSWorkspace sharedWorkspace] notificationCenter];
+        [ws addObserverForName:NSWorkspaceWillSleepNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification *note) { (void)note; if (cb) cb(); }];
+
+        NSDistributedNotificationCenter *dc = [NSDistributedNotificationCenter defaultCenter];
+        [dc addObserverForName:@"com.apple.screenIsLocked"
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification *note) { (void)note; if (cb) cb(); }];
+
+        [[NSRunLoop currentRunLoop] run];
+    }
+}

@@ -36,11 +36,23 @@ Keep `vault` and `vaultd` in the same directory — the CLI auto-starts the daem
 ```sh
 vault init                 # one-time setup
 vault set github-token     # hidden prompt for the value
+vault set aws-prod --tag prod --expires 2026-12-31   # tag + rotation reminder
 vault get github-token     # Touch ID once, then prints it
-vault list                 # names + tags
+vault list                 # names, tags, expiry
 vault status               # session state + idle countdown
 vault lock                 # lock now
 vault                      # open the TUI
+```
+
+More commands:
+
+```sh
+vault otp my-2fa                      # current TOTP code from a stored base32 seed
+vault run -e GH_TOKEN=github-token -- gh repo list   # inject secrets into a command
+vault export vault-backup.fnv         # passphrase-encrypted backup of everything
+vault import vault-backup.fnv         # restore on a new machine
+vault audit -n 20                     # recent access events from the daemon log
+vault completions zsh > ~/.zsh/_vault # shell completions
 ```
 
 In scripts and agents:
@@ -54,17 +66,28 @@ export OPENAI_API_KEY="$(vault get openai-key)"
 - **AWS** (and Terraform, boto3, any AWS SDK): `./aws-to-vault.sh --apply` moves
   `~/.aws/credentials` behind Touch ID using the CLI's native `credential_process`.
   Try it on the sample first — `./aws-to-vault.sh --dry-run .fnaws`.
-- **Google Cloud**: store the service-account JSON, then
+- **Google Cloud**: store the service-account JSON, then run tools with
+  `./with-gcp.sh gcp-sa-key -- gcloud storage ls` (it materializes the key to a
+  private temp file and cleans up), or
   `gcloud auth activate-service-account --key-file=<(vault get gcp-sa-key)`.
-- **Anything else**: `export TOKEN="$(vault get some-token)"`, or pipe it in
-  (`gh auth login --with-token < <(vault get github-token)`).
+- **Kubernetes**: `k8s-credential.sh` is an exec credential plugin — point your
+  kubeconfig's `user.exec.command` at it with the secret name as an arg.
+- **Anything else**: `export TOKEN="$(vault get some-token)"`, pipe it in
+  (`gh auth login --with-token < <(vault get github-token)`), or wrap a command
+  with `vault run -e VAR=secret -- cmd`.
 
 ## Good to know
 
+- It **auto-locks** on system sleep and screen lock, after the idle timeout, and
+  (optionally) after an absolute cap — `FNVAULT_MAX_SESSION=28800` for 8h.
+- **Tiered policy**: secrets tagged `prod`/`banking` ask for a fresh fingerprint
+  on every read, even mid-session.
+- Back up before you rely on it — Keychain items are device-only, so
+  `vault export` is your recovery path if the Mac is lost or wiped.
 - Touch ID and the Keychain need a real GUI login — this won't work over SSH or in
   CI. Use your platform's native secrets there.
-- After one unlock, anything running as your user can read secrets until it locks.
-  The idle timeout bounds that window.
+- After one unlock, anything running as your user can read non-tiered secrets
+  until it locks. The idle timeout and auto-lock bound that window.
 - The OS-enforced biometric Keychain path needs a paid Apple Developer cert, so
   fnVault gates with `LocalAuthentication` and stores a plain Keychain item
   instead. Full reasoning and tradeoffs are in [PLAN.md](PLAN.md).

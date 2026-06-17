@@ -26,6 +26,19 @@ pub struct SecretMeta {
     pub tag: String,
     pub created: String,
     pub updated: String,
+    /// Optional expiry date (YYYY-MM-DD) for rotation reminders.
+    #[serde(default)]
+    pub expires: Option<String>,
+}
+
+/// A complete secret incl. its value — used for encrypted export/import.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretRecord {
+    pub name: String,
+    pub tag: String,
+    pub value: String,
+    #[serde(default)]
+    pub expires: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -35,6 +48,15 @@ pub struct Index {
 
 pub fn is_initialized() -> bool {
     keychain::master_key_exists()
+}
+
+/// Whether a tag marks a secret as sensitive enough to require a fresh Touch ID
+/// on every read, even within an unlocked session (tiered policy).
+pub fn is_sensitive_tag(tag: &str) -> bool {
+    let t = tag.to_lowercase();
+    ["banking", "bank", "prod", "production"]
+        .iter()
+        .any(|k| t.contains(k))
 }
 
 /// Create the master key and an empty index. Errors if already initialized.
@@ -68,8 +90,19 @@ pub fn list() -> Result<Vec<SecretMeta>> {
     Ok(secrets)
 }
 
+/// Look up a secret's metadata without decrypting its value.
+pub fn get_meta(name: &str) -> Result<Option<SecretMeta>> {
+    Ok(load_index()?.secrets.into_iter().find(|m| m.name == name))
+}
+
 /// Add or update a secret. Requires the in-memory master key.
-pub fn set_secret(key: &[u8; KEY_LEN], name: &str, tag: &str, value: &[u8]) -> Result<()> {
+pub fn set_secret(
+    key: &[u8; KEY_LEN],
+    name: &str,
+    tag: &str,
+    value: &[u8],
+    expires: Option<String>,
+) -> Result<()> {
     if name.is_empty() {
         return Err(VaultError::Protocol("secret name must not be empty".into()));
     }
@@ -81,15 +114,34 @@ pub fn set_secret(key: &[u8; KEY_LEN], name: &str, tag: &str, value: &[u8]) -> R
     if let Some(meta) = index.secrets.iter_mut().find(|m| m.name == name) {
         meta.tag = tag.to_string();
         meta.updated = now;
+        meta.expires = expires;
     } else {
         index.secrets.push(SecretMeta {
             name: name.to_string(),
             tag: tag.to_string(),
             created: now.clone(),
             updated: now,
+            expires,
         });
     }
     save_index(&index)
+}
+
+/// Decrypt every secret into full records (for encrypted export).
+pub fn export_all(key: &[u8; KEY_LEN]) -> Result<Vec<SecretRecord>> {
+    let metas = load_index()?.secrets;
+    let mut records = Vec::with_capacity(metas.len());
+    for m in metas {
+        let value = get_secret(key, &m.name)?;
+        records.push(SecretRecord {
+            name: m.name,
+            tag: m.tag,
+            value: String::from_utf8(value)
+                .map_err(|_| VaultError::Protocol("non-UTF-8 secret in export".into()))?,
+            expires: m.expires,
+        });
+    }
+    Ok(records)
 }
 
 /// Decrypt and return a secret value. Requires the in-memory master key.

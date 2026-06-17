@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::store::SecretMeta;
+use crate::store::{SecretMeta, SecretRecord};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -13,9 +13,21 @@ pub enum Request {
     List,
     Unlock,
     Lock,
-    Get { name: String },
-    Set { name: String, tag: String, value: String },
-    Delete { name: String },
+    Get {
+        name: String,
+    },
+    Set {
+        name: String,
+        tag: String,
+        value: String,
+        #[serde(default)]
+        expires: Option<String>,
+    },
+    Delete {
+        name: String,
+    },
+    /// Decrypt and return every secret (for encrypted export). Requires unlock.
+    ExportAll,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +39,9 @@ pub struct StatusInfo {
     pub since_activity_secs: Option<u64>,
     /// Seconds until idle relock (None if locked or timeout disabled).
     pub idle_remaining_secs: Option<u64>,
+    /// Seconds until the absolute session cap relocks (None if locked/disabled).
+    #[serde(default)]
+    pub session_remaining_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +50,7 @@ pub enum Response {
     Ok,
     Secret { value: String },
     List { secrets: Vec<SecretMeta> },
+    Export { records: Vec<SecretRecord> },
     Status(StatusInfo),
     Error { code: String, message: String },
 }
