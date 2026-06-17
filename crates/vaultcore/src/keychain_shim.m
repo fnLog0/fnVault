@@ -30,6 +30,28 @@ static NSString *const kMasterService = @"fnvault.masterkey";
 static NSString *const kMasterAccount = @"master";
 static NSString *const kDataService = @"fnvault.data";
 
+// Build a legacy-keychain access object whose ACLs trust ALL applications
+// (trustedApplications = NULL), so items remain readable across rebuilds and
+// ad-hoc re-signs without a per-app "Always Allow" prompt. Caller CFReleases.
+// Returns NULL on failure (item is then added with the default per-app ACL).
+static SecAccessRef fnvault_open_access(void) {
+    SecAccessRef access = NULL;
+    if (SecAccessCreate(CFSTR("fnVault"), NULL, &access) != errSecSuccess) {
+        return NULL;
+    }
+    CFArrayRef acls = NULL;
+    if (SecAccessCopyACLList(access, &acls) == errSecSuccess && acls != NULL) {
+        CFIndex n = CFArrayGetCount(acls);
+        for (CFIndex i = 0; i < n; i++) {
+            SecACLRef acl = (SecACLRef)CFArrayGetValueAtIndex(acls, i);
+            // NULL trusted-app list => every application is allowed, no prompt.
+            SecACLSetContents(acl, NULL, CFSTR("fnVault"), 0);
+        }
+        CFRelease(acls);
+    }
+    return access;
+}
+
 // ---- Touch ID -----------------------------------------------------------
 
 // Prompts Touch ID (with device-passcode fallback) and blocks until the user
@@ -79,13 +101,16 @@ int fnvault_store_master_key(const uint8_t *data, size_t len) {
     SecItemDelete((__bridge CFDictionaryRef)del);
 
     NSData *keyData = [NSData dataWithBytes:data length:len];
-    NSDictionary *add = @{
+    NSMutableDictionary *add = [@{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
         (__bridge id)kSecAttrService: kMasterService,
         (__bridge id)kSecAttrAccount: kMasterAccount,
         (__bridge id)kSecValueData: keyData,
-    };
+    } mutableCopy];
+    SecAccessRef access = fnvault_open_access();
+    if (access) add[(__bridge id)kSecAttrAccess] = (__bridge id)access;
     OSStatus st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
+    if (access) CFRelease(access);
     return st == errSecSuccess ? 0 : (int)st;
 }
 
@@ -131,13 +156,16 @@ int fnvault_set_item(const char *account, const uint8_t *data, size_t len) {
     SecItemDelete((__bridge CFDictionaryRef)del);
 
     NSData *v = [NSData dataWithBytes:data length:len];
-    NSDictionary *add = @{
+    NSMutableDictionary *add = [@{
         (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
         (__bridge id)kSecAttrService: kDataService,
         (__bridge id)kSecAttrAccount: acct,
         (__bridge id)kSecValueData: v,
-    };
+    } mutableCopy];
+    SecAccessRef access = fnvault_open_access();
+    if (access) add[(__bridge id)kSecAttrAccess] = (__bridge id)access;
     OSStatus st = SecItemAdd((__bridge CFDictionaryRef)add, NULL);
+    if (access) CFRelease(access);
     return st == errSecSuccess ? 0 : (int)st;
 }
 
