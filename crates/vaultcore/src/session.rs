@@ -144,6 +144,22 @@ mod tests {
     }
 
     #[test]
+    fn external_lock_wipes_key_and_requires_reunlock() {
+        // Mirrors the sleep / screen-lock observer firing on the shared session
+        // (macOS run loop and Linux D-Bus both land here): the key is wiped and
+        // any further access must re-authenticate. Same contract on both OSes.
+        let mut s = Session::new(Duration::from_secs(900), Duration::ZERO);
+        s.set_key([9u8; KEY_LEN]);
+        assert!(s.is_unlocked());
+
+        s.lock(); // what on_lock_event() invokes
+        assert!(!s.is_unlocked());
+        assert!(matches!(s.key(), Err(VaultError::Locked)));
+        assert!(s.idle_remaining().is_none());
+        assert!(s.session_remaining().is_none());
+    }
+
+    #[test]
     fn idle_relock_fires() {
         let mut s = Session::new(Duration::ZERO, Duration::ZERO); // both disabled
         s.set_key([1u8; KEY_LEN]);

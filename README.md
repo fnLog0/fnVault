@@ -5,9 +5,11 @@ command line — so they stop living in plaintext dotfiles. It's a Rust CLI with
 TUI dashboard.
 
 - **macOS**: secrets in the Keychain, unlock with **Touch ID**.
-- **Linux**: secrets in the Secret Service (gnome-keyring / KWallet), unlock with
-  a **vault passphrase** (set on first unlock). Auto-locks on sleep and screen
-  lock (logind / screensaver over D-Bus). Fingerprint (fprintd) is planned.
+- **Linux**: secrets in the Secret Service (gnome-keyring / KWallet). Unlock with
+  your **fingerprint** when fprintd has an enrolled finger, otherwise a **vault
+  passphrase** (set on first unlock); the passphrase is always the fallback.
+  Auto-locks on sleep and screen lock (logind / screensaver over D-Bus). Set
+  `FNVAULT_NO_FPRINT=1` to skip the fingerprint and always use the passphrase.
 
 Built so your tools (and an AI agent on your machine) can grab a secret with a
 plain command, while the actual unlock still needs you.

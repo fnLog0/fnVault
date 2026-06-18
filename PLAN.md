@@ -80,3 +80,19 @@ Exit codes: `0` ok, `2` locked/auth-failed, `3` not-found, `4` daemon-unreachabl
 5. CLI client polish (auto-spawn, exit codes, hidden input)
 6. Hardening (logging, peer-UID check)
 7. TUI dashboard
+
+## Linux notes
+
+The Linux backend (Secret Service storage, passphrase/fprintd gate, D-Bus lock
+observer) cross-compiles and is clippy-clean from macOS, but the D-Bus paths
+can't run there. Smoke-test on a real Linux session:
+
+- **Auto-lock on lock**: unlock the vault, then `loginctl lock-session` (or lock
+  the desktop). `vault status` should report locked; `vaultd.log` shows
+  `auto-lock: system sleep or screen lock`.
+- **Auto-lock on sleep**: unlock, `systemctl suspend`, resume — vault is locked.
+- **Fingerprint unlock**: with `fprintd-enroll` done, `vault get <name>` should
+  prompt for a scan; a non-match or `FNVAULT_NO_FPRINT=1` falls back to the
+  passphrase. Tiered (`prod`/`banking`) secrets re-prompt the scan per read.
+- **No reader**: on a box without fprintd, unlock should fall straight through to
+  the passphrase prompt (one stderr line noting the fallback).

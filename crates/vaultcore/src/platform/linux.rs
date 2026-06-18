@@ -2,11 +2,13 @@
 //! to gnome-keyring / KWallet over D-Bus) and an unlock gate backed by a vault
 //! passphrase (Argon2-verified).
 //!
-//! Rationale: Linux fingerprint support (fprintd) is fragmented, so the
-//! universally-available gate is a passphrase. The passphrase is set on first
-//! unlock and verified thereafter — "unlock once per session", same as Touch ID
-//! on macOS. Sleep / screen-lock auto-lock is wired up via D-Bus (see
-//! [`run_lock_observer`]); fprintd biometrics are still a later pass.
+//! Rationale: a vault passphrase is the universally-available gate (set on first
+//! unlock, verified thereafter — "unlock once per session", same as Touch ID on
+//! macOS). When fprintd is present with an enrolled finger, a fingerprint scan
+//! is tried *first* and the passphrase is the fallback — mirroring Touch ID's
+//! "biometric, then passcode" flow. Sleep / screen-lock auto-lock is wired up
+//! via D-Bus (see [`run_lock_observer`]). Set `FNVAULT_NO_FPRINT` to skip the
+//! fingerprint attempt and always prompt for the passphrase.
 
 use keyring::{Entry, Error as KrError};
 use rand::rngs::OsRng;
@@ -111,8 +113,11 @@ fn derive(pass: &str, salt: &[u8]) -> Result<[u8; KEY_LEN]> {
     Ok(h)
 }
 
-/// Gate the session on the vault passphrase. Sets it on first unlock, verifies
-/// it thereafter (Argon2 over a stored salt).
+/// Gate the session. On first unlock, set the vault passphrase (always the
+/// recovery path). Thereafter, accept a matching fingerprint (fprintd) or, if
+/// that's unavailable / doesn't match, the passphrase — Argon2 over the stored
+/// salt. The same gate backs both the initial unlock and the per-read
+/// re-authentication for sensitive (tiered) secrets.
 pub fn touchid_authenticate(reason: &str) -> Result<()> {
     match read(AUTH_SERVICE, AUTH_ACCOUNT)? {
         None => {
@@ -136,6 +141,11 @@ pub fn touchid_authenticate(reason: &str) -> Result<()> {
             if blob.len() != SALT_LEN + KEY_LEN {
                 return Err(VaultError::Keychain("corrupt auth verifier".into()));
             }
+            // Biometric first (the Touch ID analog); passphrase is the fallback
+            // when fprintd is absent, has no enrolled finger, or doesn't match.
+            if fprintd_verify() {
+                return Ok(());
+            }
             let (salt, stored) = blob.split_at(SALT_LEN);
             let h = derive(&ask(reason)?, salt)?;
             if h.as_slice() == stored {
@@ -145,6 +155,77 @@ pub fn touchid_authenticate(reason: &str) -> Result<()> {
             }
         }
     }
+}
+
+// ---- fprintd biometric gate ---------------------------------------------
+
+/// Try to verify a fingerprint via fprintd. Returns `true` only on a match;
+/// any other outcome (service missing, no enrolled finger, no match, scan
+/// error, or disabled via `FNVAULT_NO_FPRINT`) returns `false` so the caller
+/// falls back to the passphrase. Never blocks longer than fprintd's own verify
+/// timeout.
+fn fprintd_verify() -> bool {
+    if std::env::var_os("FNVAULT_NO_FPRINT").is_some() {
+        return false;
+    }
+    match fprintd_attempt() {
+        Ok(matched) => matched,
+        Err(e) => {
+            // Non-fatal: no usable fingerprint reader -> passphrase fallback.
+            eprintln!("fnvault: fingerprint unavailable ({e}); using passphrase");
+            false
+        }
+    }
+}
+
+fn fprintd_attempt() -> zbus::Result<bool> {
+    const SERVICE: &str = "net.reactivated.Fprint";
+    let conn = zbus::blocking::Connection::system()?;
+
+    // Resolve the default reader.
+    let mgr = zbus::blocking::Proxy::new(
+        &conn,
+        SERVICE,
+        "/net/reactivated/Fprint/Manager",
+        "net.reactivated.Fprint.Manager",
+    )?;
+    let device: zbus::zvariant::OwnedObjectPath = mgr.call("GetDefaultDevice", &())?;
+
+    let dev = zbus::blocking::Proxy::new(
+        &conn,
+        SERVICE,
+        device.as_str().to_string(),
+        "net.reactivated.Fprint.Device",
+    )?;
+
+    // "" = the calling user. No enrolled finger -> nothing to verify against.
+    let enrolled: Vec<String> = dev.call("ListEnrolledFingers", &"")?;
+    if enrolled.is_empty() {
+        return Ok(false);
+    }
+
+    let _: () = dev.call("Claim", &"")?;
+    // Subscribe before VerifyStart so no status signal is missed.
+    let outcome = (|| -> zbus::Result<bool> {
+        let signals = dev.receive_signal("VerifyStatus")?;
+        let _: () = dev.call("VerifyStart", &"any")?;
+        for msg in signals {
+            let body = msg.body();
+            let (result, done): (String, bool) = body.deserialize()?;
+            if result == "verify-match" {
+                return Ok(true);
+            }
+            if result == "verify-no-match" || done {
+                return Ok(false);
+            }
+            // Transient (verify-retry-scan, verify-swipe-too-short, …): wait.
+        }
+        Ok(false)
+    })();
+    // Best-effort teardown regardless of the verify result.
+    let _: zbus::Result<()> = dev.call("VerifyStop", &());
+    let _: zbus::Result<()> = dev.call("Release", &());
+    outcome
 }
 
 pub fn touch_id_unlock(reason: &str) -> Result<[u8; KEY_LEN]> {
