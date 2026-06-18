@@ -6,8 +6,8 @@ TUI dashboard.
 
 - **macOS**: secrets in the Keychain, unlock with **Touch ID**.
 - **Linux**: secrets in the Secret Service (gnome-keyring / KWallet), unlock with
-  a **vault passphrase** (set on first unlock). Fingerprint (fprintd) and
-  auto-lock-on-sleep are planned.
+  a **vault passphrase** (set on first unlock). Auto-locks on sleep and screen
+  lock (logind / screensaver over D-Bus). Fingerprint (fprintd) is planned.
 
 Built so your tools (and an AI agent on your machine) can grab a secret with a
 plain command, while the actual unlock still needs you.

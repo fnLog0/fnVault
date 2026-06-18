@@ -5,7 +5,8 @@
 //! Rationale: Linux fingerprint support (fprintd) is fragmented, so the
 //! universally-available gate is a passphrase. The passphrase is set on first
 //! unlock and verified thereafter — "unlock once per session", same as Touch ID
-//! on macOS. (fprintd biometrics + sleep/screen-lock auto-lock are a later pass.)
+//! on macOS. Sleep / screen-lock auto-lock is wired up via D-Bus (see
+//! [`run_lock_observer`]); fprintd biometrics are still a later pass.
 
 use keyring::{Entry, Error as KrError};
 use rand::rngs::OsRng;
@@ -151,11 +152,103 @@ pub fn touch_id_unlock(reason: &str) -> Result<[u8; KEY_LEN]> {
     read_master_key()
 }
 
-pub fn run_lock_observer(_cb: extern "C" fn()) {
-    // TODO(step 3): subscribe to logind PrepareForSleep + screensaver lock over
-    // D-Bus. For now the idle-timeout backstop handles relocking; park so the
-    // daemon's observer thread stays idle rather than spinning.
-    loop {
-        std::thread::park();
+// ---- lock-event observer ------------------------------------------------
+
+/// When to fire the relock callback for a given signal.
+enum RelockOn {
+    /// Fire on every emission (signal carries no useful argument).
+    Always,
+    /// Fire only when the first boolean argument is `true` (e.g. "going to
+    /// sleep" / "screensaver became active").
+    BoolArgTrue,
+}
+
+/// Subscribe to one D-Bus signal and, on a dedicated thread, relock via `cb`
+/// whenever it fires per `mode`. Returns the join handle, or `None` if the
+/// match rule / subscription could not be set up (the caller carries on with
+/// whatever other sources succeeded).
+fn watch(
+    conn: &zbus::blocking::Connection,
+    interface: &str,
+    member: &str,
+    cb: extern "C" fn(),
+    mode: RelockOn,
+) -> Option<std::thread::JoinHandle<()>> {
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .interface(interface.to_string())
+        .ok()?
+        .member(member.to_string())
+        .ok()?
+        .build();
+    let iter = zbus::blocking::MessageIterator::for_match_rule(rule, conn, None).ok()?;
+    Some(std::thread::spawn(move || {
+        for msg in iter {
+            let Ok(msg) = msg else { continue };
+            let fire = match mode {
+                RelockOn::Always => true,
+                RelockOn::BoolArgTrue => msg.body().deserialize::<bool>().unwrap_or(false),
+            };
+            if fire {
+                cb();
+            }
+        }
+    }))
+}
+
+/// Relock on system sleep and screen lock by listening for D-Bus signals:
+///
+/// - **system bus** — logind `PrepareForSleep(true)` (suspend/hibernate) and
+///   `Session.Lock` (`loginctl lock-session`, emitted by most desktops on lock);
+/// - **session bus** — freedesktop `ScreenSaver.ActiveChanged(true)`.
+///
+/// Each source runs on its own thread; this call blocks until they all end
+/// (which is effectively never). If no bus / signal is reachable (headless box,
+/// no session bus), it parks instead — the daemon's idle-timeout backstop still
+/// relocks. Mirrors the macOS observer's run-loop contract: call from a
+/// dedicated thread.
+pub fn run_lock_observer(cb: extern "C" fn()) {
+    let mut handles = Vec::new();
+
+    match zbus::blocking::Connection::system() {
+        Ok(conn) => {
+            handles.extend(watch(
+                &conn,
+                "org.freedesktop.login1.Manager",
+                "PrepareForSleep",
+                cb,
+                RelockOn::BoolArgTrue,
+            ));
+            handles.extend(watch(
+                &conn,
+                "org.freedesktop.login1.Session",
+                "Lock",
+                cb,
+                RelockOn::Always,
+            ));
+        }
+        Err(e) => eprintln!("fnvault: no system bus for lock observer ({e}); idle timeout still active"),
+    }
+
+    if let Ok(conn) = zbus::blocking::Connection::session() {
+        handles.extend(watch(
+            &conn,
+            "org.freedesktop.ScreenSaver",
+            "ActiveChanged",
+            cb,
+            RelockOn::BoolArgTrue,
+        ));
+    }
+
+    if handles.is_empty() {
+        // Nothing to observe; keep the thread alive so the daemon's contract
+        // (an observer thread that never returns) still holds.
+        loop {
+            std::thread::park();
+        }
+    }
+
+    for h in handles {
+        let _ = h.join();
     }
 }

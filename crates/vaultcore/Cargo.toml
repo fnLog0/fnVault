@@ -28,6 +28,10 @@ keyring = { version = "3", default-features = false, features = [
     "async-io",
     "crypto-rust",
 ] }
+# Lock-event observer: logind sleep + session lock (system bus) and the
+# freedesktop screensaver (session bus). Pure-Rust, async-io executor to match
+# keyring (no system libdbus, no nested tokio runtime).
+zbus = { version = "4", default-features = false, features = ["async-io"] }
 
 [build-dependencies]
 cc = "1"
