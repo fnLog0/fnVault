@@ -118,22 +118,33 @@ pub fn get(names: &[String], full: bool) -> i32 {
 }
 
 /// `vault skills path [name]` — print where the skill files live on disk.
-/// Honors `FNVAULT_SKILLS_DIR`; otherwise reports the build-time source
-/// location. The skill is stored flat under the skills root, so a named
-/// lookup resolves to that same directory.
+/// Honors `FNVAULT_SKILLS_DIR`. Otherwise falls back to the build-time source
+/// tree, which only exists in a checkout — a distributed binary (Homebrew,
+/// release tarball, `cargo install`) has no on-disk skills dir, since the
+/// content is embedded, so we say so instead of printing a stale build path.
 pub fn path(name: Option<&str>) -> i32 {
-    let raw = match std::env::var_os("FNVAULT_SKILLS_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../skills")),
-    };
-    // Prefer a clean absolute path when the directory actually exists.
-    let root = raw.canonicalize().unwrap_or(raw);
     if let Some(n) = name {
         if find(n).is_none() {
             eprintln!("error: no skill named `{n}` (try `vault skills list`)");
             return 3;
         }
     }
-    println!("{}", root.display());
+
+    // An explicit override always wins; print it canonicalized if it exists.
+    if let Some(dir) = std::env::var_os("FNVAULT_SKILLS_DIR") {
+        let p = PathBuf::from(dir);
+        println!("{}", p.canonicalize().unwrap_or(p).display());
+        return 0;
+    }
+
+    // Build-time source location — present only when run from a checkout.
+    let build = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../skills"));
+    if let Ok(real) = build.canonicalize() {
+        println!("{}", real.display());
+        return 0;
+    }
+
+    eprintln!("skills are embedded in this binary; there is no on-disk path.");
+    eprintln!("set FNVAULT_SKILLS_DIR to point `vault skills path` at a directory.");
     0
 }
