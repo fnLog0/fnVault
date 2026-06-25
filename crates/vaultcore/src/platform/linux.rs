@@ -308,7 +308,9 @@ pub fn run_lock_observer(cb: extern "C" fn()) {
                 RelockOn::Always,
             ));
         }
-        Err(e) => eprintln!("fnvault: no system bus for lock observer ({e}); idle timeout still active"),
+        Err(e) => {
+            eprintln!("fnvault: no system bus for lock observer ({e}); idle timeout still active")
+        }
     }
 
     if let Ok(conn) = zbus::blocking::Connection::session() {

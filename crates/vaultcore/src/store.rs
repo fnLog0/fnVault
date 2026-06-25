@@ -86,7 +86,7 @@ pub fn save_index(index: &Index) -> Result<()> {
 
 pub fn list() -> Result<Vec<SecretMeta>> {
     let mut secrets = load_index()?.secrets;
-    secrets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    secrets.sort_by_key(|s| s.name.to_lowercase());
     Ok(secrets)
 }
 
