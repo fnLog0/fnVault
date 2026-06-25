@@ -1,11 +1,12 @@
 //! fnVault CLI client and TUI launcher.
 
 mod client;
+mod skills;
 mod tui;
 
 use std::io::{Read, Write};
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 
 use vaultcore::protocol::{Request, Response};
 use vaultcore::store::SecretRecord;
@@ -79,8 +80,32 @@ enum Command {
     Status,
     /// Print shell completions (bash|zsh|fish|powershell|elvish).
     Completions { shell: clap_complete::Shell },
+    /// Show bundled agent skills (list | get | path).
+    Skills(SkillsArgs),
     /// Launch the interactive TUI dashboard (default with no command).
     Ui,
+}
+
+#[derive(Args)]
+struct SkillsArgs {
+    #[command(subcommand)]
+    command: Option<SkillsCommand>,
+}
+
+#[derive(Subcommand)]
+enum SkillsCommand {
+    /// List available skills (default).
+    List,
+    /// Print a skill's SKILL.md; --full appends references and templates.
+    Get {
+        #[arg(required = true)]
+        names: Vec<String>,
+        /// Include the skill's reference and template files.
+        #[arg(long)]
+        full: bool,
+    },
+    /// Print the filesystem path to the skills directory (or one skill).
+    Path { name: Option<String> },
 }
 
 fn main() {
@@ -122,6 +147,11 @@ fn run_command(cmd: Command) -> i32 {
             clap_complete::generate(shell, &mut Cli::command(), "vault", &mut std::io::stdout());
             0
         }
+        Command::Skills(args) => match args.command.unwrap_or(SkillsCommand::List) {
+            SkillsCommand::List => skills::list(),
+            SkillsCommand::Get { names, full } => skills::get(&names, full),
+            SkillsCommand::Path { name } => skills::path(name.as_deref()),
+        },
         Command::Ui => 0, // handled in main()
     }
 }

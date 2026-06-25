@@ -5,8 +5,8 @@
 # private temp file for the duration of the command and delete it afterwards.
 #
 # Usage:
-#   ./with-gcp.sh gcp-sa-key -- gcloud storage ls
-#   ./with-gcp.sh gcp-sa-key -- terraform apply
+#   ./scripts/with-gcp.sh gcp-sa-key -- gcloud storage ls
+#   ./scripts/with-gcp.sh gcp-sa-key -- terraform apply
 set -euo pipefail
 NAME="${1:?usage: with-gcp.sh <vault-secret-name> -- <command...>}"; shift
 [[ "${1:-}" == "--" ]] && shift

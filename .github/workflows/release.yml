@@ -1,0 +1,90 @@
+name: release
+
+# Build prebuilt `vault` + `vaultd` binaries for macOS and Linux (arm64 + x86_64)
+# on every v* tag and attach the tarballs to the GitHub Release.
+#
+# NOTE: downloaded macOS binaries are not signed/notarized, so Gatekeeper will
+# quarantine them. For a clean macOS install prefer the Homebrew tap (builds
+# from source). These artifacts are ideal for Linux and for `cargo-binstall`.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p vault -p vaultd
+
+      - name: package
+        id: package
+        shell: bash
+        run: |
+          dist="fnvault-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir "$dist"
+          cp "target/${{ matrix.target }}/release/vault" \
+             "target/${{ matrix.target }}/release/vaultd" \
+             README.md LICENSE "$dist/"
+          tar czf "$dist.tar.gz" "$dist"
+          shasum -a 256 "$dist.tar.gz" > "$dist.tar.gz.sha256"
+          echo "name=$dist" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            fnvault-*.tar.gz
+            fnvault-*.tar.gz.sha256
+          retention-days: 7
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    # Only publish when triggered by a tag (workflow_dispatch builds artifacts only).
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: checksums manifest
+        run: cat dist/*.sha256 > dist/SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/fnvault-*.tar.gz
+            dist/fnvault-*.tar.gz.sha256
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+          fail_on_unmatched_files: true

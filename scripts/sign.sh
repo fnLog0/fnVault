@@ -10,8 +10,8 @@
 set -euo pipefail
 
 PROFILE="${1:-release}"
-DIR="$(cd "$(dirname "$0")" && pwd)"
-BIN="$DIR/target/$PROFILE"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"   # repo root (this script lives in scripts/)
+BIN="$ROOT/target/$PROFILE"
 
 for b in vaultd vault; do
     codesign --force --sign - "$BIN/$b"
