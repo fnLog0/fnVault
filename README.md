@@ -30,6 +30,21 @@ kept in the OS secret store; the key is wiped from memory the moment it locks.
 
 ## Install
 
+### Homebrew (macOS & Linux)
+
+The Homebrew formula lives in this repo (`Formula/fnvault.rb`), so tap it by URL:
+
+```sh
+brew tap fnLog0/fnvault https://github.com/fnLog0/fnVault
+brew install fnvault
+```
+
+It builds from source, so the binaries are compiled locally — no Apple
+notarization needed and nothing is quarantined by Gatekeeper. Both `vault` and
+`vaultd` install into the same prefix, and shell completions are set up for you.
+
+### From source
+
 ```sh
 cargo build --release
 ./scripts/sign.sh release   # optional — gives a stable Keychain identity so it stops re-prompting
