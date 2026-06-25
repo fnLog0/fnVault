@@ -32,7 +32,7 @@ kept in the OS secret store; the key is wiped from memory the moment it locks.
 
 ```sh
 cargo build --release
-./sign.sh release        # optional — gives a stable Keychain identity so it stops re-prompting
+./scripts/sign.sh release   # optional — gives a stable Keychain identity so it stops re-prompting
 cp target/release/vault target/release/vaultd ~/.local/bin/
 ```
 
@@ -60,6 +60,21 @@ vault export vault-backup.fnv         # passphrase-encrypted backup of everythin
 vault import vault-backup.fnv         # restore on a new machine
 vault audit -n 20                     # recent access events from the daemon log
 vault completions zsh > ~/.zsh/_vault # shell completions
+vault skills list                     # bundled agent skills (version-matched)
+vault skills get fnvault --full       # full usage guide + references + templates
+```
+
+### Skills for AI agents
+
+fnVault ships a bundled [agent skill](skills/SKILL.md) — a usage guide,
+references, and copy-paste templates — embedded in the binary so it always
+matches the installed version (the same pattern as `agent-browser skills`):
+
+```sh
+vault skills list                 # list available skills
+vault skills get fnvault          # print the SKILL.md
+vault skills get fnvault --full   # append references/ and templates/
+vault skills path fnvault         # filesystem path (override with FNVAULT_SKILLS_DIR)
 ```
 
 In scripts and agents:
@@ -70,15 +85,16 @@ export OPENAI_API_KEY="$(vault get openai-key)"
 
 ## Works with your other tools
 
-- **AWS** (and Terraform, boto3, any AWS SDK): `./aws-to-vault.sh --apply` moves
-  `~/.aws/credentials` behind Touch ID using the CLI's native `credential_process`.
-  Try it on the sample first — `./aws-to-vault.sh --dry-run .fnaws`.
+- **AWS** (and Terraform, boto3, any AWS SDK): `./scripts/aws-to-vault.sh --apply`
+  moves `~/.aws/credentials` behind Touch ID using the CLI's native
+  `credential_process`. Try it on the sample first —
+  `./scripts/aws-to-vault.sh --dry-run .fnaws`.
 - **Google Cloud**: store the service-account JSON, then run tools with
-  `./with-gcp.sh gcp-sa-key -- gcloud storage ls` (it materializes the key to a
-  private temp file and cleans up), or
+  `./scripts/with-gcp.sh gcp-sa-key -- gcloud storage ls` (it materializes the key
+  to a private temp file and cleans up), or
   `gcloud auth activate-service-account --key-file=<(vault get gcp-sa-key)`.
-- **Kubernetes**: `k8s-credential.sh` is an exec credential plugin — point your
-  kubeconfig's `user.exec.command` at it with the secret name as an arg.
+- **Kubernetes**: `scripts/k8s-credential.sh` is an exec credential plugin — point
+  your kubeconfig's `user.exec.command` at it with the secret name as an arg.
 - **Anything else**: `export TOKEN="$(vault get some-token)"`, pipe it in
   (`gh auth login --with-token < <(vault get github-token)`), or wrap a command
   with `vault run -e VAR=secret -- cmd`.

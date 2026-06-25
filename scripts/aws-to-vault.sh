@@ -6,7 +6,7 @@
 # unchanged while the keys live behind Touch ID.
 #
 # Usage:
-#   ./aws-to-vault.sh [--dry-run | --apply] [SOURCE_FILE]
+#   ./scripts/aws-to-vault.sh [--dry-run | --apply] [SOURCE_FILE]
 #
 #   --dry-run     parse and show the plan; do not call vault or write anything
 #   --apply       store secrets AND edit ~/.aws/{config,credentials} for you,
@@ -19,7 +19,7 @@
 # Safe testing against temp files (no risk to real ~/.aws):
 #   cp .fnaws /tmp/test-cred; rm -f /tmp/test-config
 #   AWS_SHARED_CREDENTIALS_FILE=/tmp/test-cred AWS_CONFIG_FILE=/tmp/test-config \
-#     ./aws-to-vault.sh --apply /tmp/test-cred
+#     ./scripts/aws-to-vault.sh --apply /tmp/test-cred
 set -euo pipefail
 
 MODE="print"   # print | dry | apply
