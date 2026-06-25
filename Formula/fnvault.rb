@@ -15,7 +15,7 @@ class Fnvault < Formula
     system "cargo", "install", *std_cargo_args(path: "crates/vaultd")
     system "cargo", "install", *std_cargo_args(path: "crates/vault")
 
-    generate_completions_from_executable(bin/"vault", "completions", shells: [:bash, :zsh, :fish])
+    generate_completions_from_executable(bin/"vault", "completions")
   end
 
   test do
