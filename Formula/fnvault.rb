@@ -1,8 +1,8 @@
 class Fnvault < Formula
   desc "Touch ID/passphrase-gated credential vault with a CLI, TUI, and daemon"
   homepage "https://github.com/fnLog0/fnVault"
-  url "https://github.com/fnLog0/fnVault/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "5de9afc70abeb8d5fe8f3cc917f9cc538ca7ef39733c4069581e96c2efe96ddb"
+  url "https://github.com/fnLog0/fnVault/archive/refs/tags/v0.1.1.tar.gz"
+  sha256 "5043bcabf9583ca0b34aa413714e242fee89b20ebeb779f6512d92bc2b7c4225"
   license "MIT"
   head "https://github.com/fnLog0/fnVault.git", branch: "main"
 
