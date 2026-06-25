@@ -43,6 +43,45 @@ It builds from source, so the binaries are compiled locally — no Apple
 notarization needed and nothing is quarantined by Gatekeeper. Both `vault` and
 `vaultd` install into the same prefix, and shell completions are set up for you.
 
+### Linux (prebuilt binary)
+
+Every release ships prebuilt `x86_64` and `aarch64` Linux binaries — no build
+required. Grab the right tarball from the [latest release][releases]
+(`uname -m` tells you your arch), verify it, and install both binaries:
+
+```sh
+ARCH=x86_64            # or aarch64
+VER=v0.1.2             # or the latest from the releases page
+BASE="https://github.com/fnLog0/fnVault/releases/download/$VER"
+NAME="fnvault-$VER-${ARCH}-unknown-linux-gnu"
+
+curl -fsSL -O "$BASE/$NAME.tar.gz"
+curl -fsSL -O "$BASE/$NAME.tar.gz.sha256"
+sha256sum -c "$NAME.tar.gz.sha256"               # verify integrity
+
+tar xzf "$NAME.tar.gz"
+mkdir -p ~/.local/bin
+install -m755 "$NAME/vault" "$NAME/vaultd" ~/.local/bin/   # both must share a dir
+```
+
+Make sure `~/.local/bin` is on your `PATH`, then run `vault init`. To update
+later, re-run with a newer `VER`. (Homebrew on Linux works too — see above.)
+
+[releases]: https://github.com/fnLog0/fnVault/releases/latest
+
+#### Linux runtime requirements
+
+There's no Touch ID on Linux, so:
+
+- **Secret storage** needs a running **Secret Service** provider —
+  `gnome-keyring` or **KWallet** (over D-Bus). Desktop sessions usually have one
+  already; a headless/SSH box needs one started.
+- **Unlock** uses your **fingerprint** when `fprintd` has an enrolled finger,
+  otherwise a **vault passphrase** set on first unlock (the passphrase is always
+  the fallback). Set `FNVAULT_NO_FPRINT=1` to skip the fingerprint.
+- **Auto-lock** on sleep and screen lock works via logind / the screensaver over
+  D-Bus.
+
 ### From source
 
 ```sh
