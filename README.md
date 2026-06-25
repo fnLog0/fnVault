@@ -113,7 +113,7 @@ export OPENAI_API_KEY="$(vault get openai-key)"
   until it locks. The idle timeout and auto-lock bound that window.
 - The OS-enforced biometric Keychain path needs a paid Apple Developer cert, so
   fnVault gates with `LocalAuthentication` and stores a plain Keychain item
-  instead. Full reasoning and tradeoffs are in [PLAN.md](PLAN.md).
+  instead.
 
 ## License
 
