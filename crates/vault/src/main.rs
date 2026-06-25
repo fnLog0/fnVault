@@ -95,7 +95,11 @@ struct SkillsArgs {
 #[derive(Subcommand)]
 enum SkillsCommand {
     /// List available skills (default).
-    List,
+    List {
+        /// Emit the list as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Print a skill's SKILL.md; --full appends references and templates.
     Get {
         #[arg(required = true)]
@@ -103,12 +107,22 @@ enum SkillsCommand {
         /// Include the skill's reference and template files.
         #[arg(long)]
         full: bool,
+        /// Emit the skill(s) as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Print the filesystem path to the skills directory (or one skill).
     Path { name: Option<String> },
 }
 
 fn main() {
+    // Restore default SIGPIPE handling so piping output into `head`/`grep` (which
+    // close the pipe early) exits quietly instead of panicking on a broken pipe.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     let cli = Cli::parse();
     let code = match cli.command {
         None | Some(Command::Ui) => match tui::run() {
@@ -147,11 +161,13 @@ fn run_command(cmd: Command) -> i32 {
             clap_complete::generate(shell, &mut Cli::command(), "vault", &mut std::io::stdout());
             0
         }
-        Command::Skills(args) => match args.command.unwrap_or(SkillsCommand::List) {
-            SkillsCommand::List => skills::list(),
-            SkillsCommand::Get { names, full } => skills::get(&names, full),
-            SkillsCommand::Path { name } => skills::path(name.as_deref()),
-        },
+        Command::Skills(args) => {
+            match args.command.unwrap_or(SkillsCommand::List { json: false }) {
+                SkillsCommand::List { json } => skills::list(json),
+                SkillsCommand::Get { names, full, json } => skills::get(&names, full, json),
+                SkillsCommand::Path { name } => skills::path(name.as_deref()),
+            }
+        }
         Command::Ui => 0, // handled in main()
     }
 }
